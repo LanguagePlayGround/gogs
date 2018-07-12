@@ -64,7 +64,6 @@ function initEditDiffTab($form) {
         var $this = $(this);
         $.post($this.data('url'), {
                 "_csrf": csrf,
-                "context": $this.data('context'),
                 "content": $form.find('.tab.segment[data-tab="' + $tabMenu.data('write') + '"] textarea').val()
             },
             function (data) {
@@ -108,16 +107,21 @@ function initCommentForm() {
         });
     }
 
+    // Add &nbsp; to each unselected label to keep UI looks good.
+    // This should be added directly to HTML but somehow just get empty <span> on this page.
+    $labelMenu.find('.item:not(.no-select) .octicon:not(.octicon-check)').each(function () {
+        $(this).html('&nbsp;');
+    });
     $labelMenu.find('.item:not(.no-select)').click(function () {
         if ($(this).hasClass('checked')) {
             $(this).removeClass('checked');
-            $(this).find('.octicon').removeClass('octicon-check');
+            $(this).find('.octicon').removeClass('octicon-check').html('&nbsp;');
             if (hasLabelUpdateAction) {
                 updateIssueMeta($labelMenu.data('update-url'), "detach", $(this).data('id'));
             }
         } else {
             $(this).addClass('checked');
-            $(this).find('.octicon').addClass('octicon-check');
+            $(this).find('.octicon').addClass('octicon-check').html('');
             if (hasLabelUpdateAction) {
                 updateIssueMeta($labelMenu.data('update-url'), "attach", $(this).data('id'));
             }
@@ -147,7 +151,7 @@ function initCommentForm() {
 
         $(this).parent().find('.item').each(function () {
             $(this).removeClass('checked');
-            $(this).find('.octicon').removeClass('octicon-check');
+            $(this).find('.octicon').removeClass('octicon-check').html('&nbsp;');
         });
 
         $list.find('.item').each(function () {
@@ -204,80 +208,6 @@ function initCommentForm() {
     selectItem('.select-assignee', '#assignee_id');
 }
 
-function initInstall() {
-    if ($('.install').length == 0) {
-        return;
-    }
-
-    // Database type change detection.
-    $("#db_type").change(function () {
-        var sqliteDefault = 'data/gogs.db';
-        var tidbDefault = 'data/gogs_tidb';
-
-        var dbType = $(this).val();
-        if (dbType === "SQLite3" || dbType === "TiDB") {
-            $('#sql_settings').hide();
-            $('#pgsql_settings').hide();
-            $('#sqlite_settings').show();
-
-            if (dbType === "SQLite3" && $('#db_path').val() == tidbDefault) {
-                $('#db_path').val(sqliteDefault);
-            } else if (dbType === "TiDB" && $('#db_path').val() == sqliteDefault) {
-                $('#db_path').val(tidbDefault);
-            }
-            return;
-        }
-
-        var mysqlDefault = '127.0.0.1:3306';
-        var postgresDefault = '127.0.0.1:5432';
-
-        $('#sqlite_settings').hide();
-        $('#sql_settings').show();
-        if (dbType === "PostgreSQL") {
-            $('#pgsql_settings').show();
-            if ($('#db_host').val() == mysqlDefault) {
-                $('#db_host').val(postgresDefault);
-            }
-        } else {
-            $('#pgsql_settings').hide();
-            if ($('#db_host').val() == postgresDefault) {
-                $('#db_host').val(mysqlDefault);
-            }
-        }
-    });
-
-    // TODO: better handling of exclusive relations.
-    $('#offline-mode input').change(function () {
-        if ($(this).is(':checked')) {
-            $('#disable-gravatar').checkbox('check');
-            $('#federated-avatar-lookup').checkbox('uncheck');
-        }
-    });
-    $('#disable-gravatar input').change(function () {
-        if ($(this).is(':checked')) {
-            $('#federated-avatar-lookup').checkbox('uncheck');
-        } else {
-            $('#offline-mode').checkbox('uncheck');
-        }
-    });
-    $('#federated-avatar-lookup input').change(function () {
-        if ($(this).is(':checked')) {
-            $('#disable-gravatar').checkbox('uncheck');
-            $('#offline-mode').checkbox('uncheck');
-        }
-    });
-    $('#disable-registration input').change(function () {
-        if ($(this).is(':checked')) {
-            $('#enable-captcha').checkbox('uncheck');
-        }
-    });
-    $('#enable-captcha input').change(function () {
-        if ($(this).is(':checked')) {
-            $('#disable-registration').checkbox('uncheck');
-        }
-    });
-}
-
 function initRepository() {
     if ($('.repository').length == 0) {
         return;
@@ -324,20 +254,16 @@ function initRepository() {
                 $prompt.hide();
             }
         });
+    }
 
-        // Enable or select internal/external wiki system and issue tracker.
-        $('.enable-system').change(function () {
+    // Branches
+    if ($('.repository.settings.branches').length > 0) {
+        initFilterSearchDropdown('.protected-branches .dropdown');
+        $('.enable-protection, .enable-whitelist').change(function () {
             if (this.checked) {
                 $($(this).data('target')).removeClass('disabled');
             } else {
                 $($(this).data('target')).addClass('disabled');
-            }
-        });
-        $('.enable-system-radio').change(function () {
-            if (this.value == 'false') {
-                $($(this).data('target')).addClass('disabled');
-            } else if (this.value == 'true') {
-                $($(this).data('target')).removeClass('disabled');
             }
         });
     }
@@ -401,7 +327,7 @@ function initRepository() {
     if ($('.repository.view.issue').length > 0) {
         // Edit issue title
         var $issueTitle = $('#issue-title');
-        var $editInput = $('#edit-title-input input');
+        var $editInput = $('#edit-title-input').find('input');
         var editTitleToggle = function () {
             $issueTitle.toggle();
             $('.not-in-edit').toggle();
@@ -534,6 +460,20 @@ function initRepository() {
                 $item.find(".bar .add").css("width", addPercent + "%");
             });
         }
+
+        $('.diff-file-box .lines-num').click(function () {
+            if ($(this).attr('id')) {
+                window.location.href = '#' + $(this).attr('id');
+            }
+        });
+
+        $(window).on('hashchange', function (e) {
+            $('.diff-file-box .lines-code.active').removeClass('active');
+            var m = window.location.hash.match(/^#diff-.+$/);
+            if (m) {
+                $(m[0]).siblings('.lines-code').addClass('active');
+            }
+        }).trigger('hashchange');
     }
 
     // Quick start and repository home
@@ -559,20 +499,15 @@ function initRepository() {
     if ($('.repository.compare.pull').length > 0) {
         initFilterSearchDropdown('.choose.branch .dropdown');
     }
-}
-
-function initRepositoryCollaboration() {
-    console.log('initRepositoryCollaboration');
-
-    // Change collaborator access mode
-    $('.access-mode.menu .item').click(function () {
-        var $menu = $(this).parent();
-        $.post($menu.data('url'), {
-            "_csrf": csrf,
-            "uid": $menu.data('uid'),
-            "mode": $(this).data('value')
-        })
-    });
+    if ($('.repository.view.pull').length > 0) {
+    	$('.comment.merge.box input[name=merge_style]').change(function () {
+    		if ($(this).val() === 'create_merge_commit') {
+				$('.commit.description.field').show();
+			} else {
+				$('.commit.description.field').hide();
+			}
+		})
+	}
 }
 
 function initWikiForm() {
@@ -687,7 +622,7 @@ function setSimpleMDE($editArea) {
             "code", "quote", "|",
             "unordered-list", "ordered-list", "|",
             "link", "image", "table", "horizontal-rule", "|",
-            "clean-block", "preview", "fullscreen", "side-by-side"]
+            "clean-block"]
     });
 
     return true;
@@ -764,9 +699,13 @@ function initEditor() {
                 parts.push(element.text());
             }
         });
-        if ($(this).val())
+        if ($(this).val()) {
             parts.push($(this).val());
-        $('#tree_path').val(parts.join('/'));
+        }
+
+        var tree_path = parts.join('/');
+        $('#tree_path').val(tree_path);
+        $('#preview-tab').data('context', $('#preview-tab').data('root-context') + tree_path.substring(0, tree_path.lastIndexOf("/")+1));
     }).trigger('keyup');
 
     var $editArea = $('.repository.editor textarea#edit_area');
@@ -874,52 +813,6 @@ function initOrganization() {
             }
         });
     }
-}
-
-function initUserSettings() {
-    console.log('initUserSettings');
-
-    // Options
-    if ($('.user.settings.profile').length > 0) {
-        $('#username').keyup(function () {
-            var $prompt = $('#name-change-prompt');
-            if ($(this).val().toString().toLowerCase() != $(this).data('name').toString().toLowerCase()) {
-                $prompt.show();
-            } else {
-                $prompt.hide();
-            }
-        });
-    }
-}
-
-function initWebhook() {
-    if ($('.new.webhook').length == 0) {
-        return;
-    }
-
-    $('.events.checkbox input').change(function () {
-        if ($(this).is(':checked')) {
-            $('.events.fields').show();
-        }
-    });
-    $('.non-events.checkbox input').change(function () {
-        if ($(this).is(':checked')) {
-            $('.events.fields').hide();
-        }
-    });
-
-    // Test delivery
-    $('#test-delivery').click(function () {
-        var $this = $(this);
-        $this.addClass('loading disabled');
-        $.post($this.data('link'), {
-            "_csrf": csrf
-        }).done(
-            setTimeout(function () {
-                window.location.href = $this.data('redirect');
-            }, 5000)
-        )
-    });
 }
 
 function initAdmin() {
@@ -1142,7 +1035,7 @@ function searchRepositories() {
                 if (response.ok && response.data.length) {
                     var html = '';
                     $.each(response.data, function (i, item) {
-                        html += '<div class="item"><i class="icon octicon octicon-repo"></i> <span class="fullname">' + item.full_name + '</span></div>';
+                        html += '<div class="item"><i class="octicon octicon-repo"></i> <span class="fullname">' + item.full_name + '</span></div>';
                     });
                     $results.html(html);
                     $this.find('.results .item').click(function () {
@@ -1191,9 +1084,79 @@ function initCodeView() {
     }
 }
 
+function initUserSettings() {
+    console.log('initUserSettings');
+
+    // Options
+    if ($('.user.settings.profile').length > 0) {
+        $('#username').keyup(function () {
+            var $prompt = $('#name-change-prompt');
+            if ($(this).val().toString().toLowerCase() != $(this).data('name').toString().toLowerCase()) {
+                $prompt.show();
+            } else {
+                $prompt.hide();
+            }
+        });
+    }
+}
+
+function initRepositoryCollaboration() {
+    console.log('initRepositoryCollaboration');
+
+    // Change collaborator access mode
+    $('.access-mode.menu .item').click(function () {
+        var $menu = $(this).parent();
+        $.post($menu.data('url'), {
+            "_csrf": csrf,
+            "uid": $menu.data('uid'),
+            "mode": $(this).data('value')
+        })
+    });
+}
+
+function initWebhookSettings() {
+    $('.events.checkbox input').change(function () {
+        if ($(this).is(':checked')) {
+            $('.events.fields').show();
+        }
+    });
+    $('.non-events.checkbox input').change(function () {
+        if ($(this).is(':checked')) {
+            $('.events.fields').hide();
+        }
+    });
+
+    // Highlight payload on first click
+    $('.hook.history.list .toggle.button').click(function () {
+        $($(this).data('target') + ' .nohighlight').each(function () {
+            var $this = $(this);
+            $this.removeClass('nohighlight');
+            setTimeout(function(){ hljs.highlightBlock($this[0]) }, 500);
+        })
+    })
+
+    // Trigger delivery
+    $('.delivery.button, .redelivery.button').click(function () {
+        var $this = $(this);
+        $this.addClass('loading disabled');
+        $.post($this.data('link'), {
+            "_csrf": csrf
+        }).done(
+            setTimeout(function () {
+                window.location.href = $this.data('redirect');
+            }, 5000)
+        );
+    });
+}
+
 $(document).ready(function () {
     csrf = $('meta[name=_csrf]').attr("content");
     suburl = $('meta[name=_suburl]').attr("content");
+
+    // Set cursor to the end of autofocus input string
+    $('input[autofocus]').each(function () {
+        $(this).val($(this).val());
+    })
 
     // Show exact time
     $('.time-since').each(function () {
@@ -1201,9 +1164,11 @@ $(document).ready(function () {
     });
 
     // Semantic UI modules.
-    $('.dropdown').dropdown();
+    $('.ui.dropdown').dropdown({
+        forceSelection: false
+    });
     $('.jump.dropdown').dropdown({
-        action: 'hide',
+        action: 'select',
         onShow: function () {
             $('.poping.up').popup('hide');
         }
@@ -1306,7 +1271,37 @@ $(document).ready(function () {
         e.trigger.setAttribute('data-content', e.trigger.getAttribute('data-original'))
     });
 
-    // Helpers.
+    // Autosize
+    if ($('#description.autosize').length > 0) {
+        autosize($('#description'));
+        showMessageMaxLength(512, 'description', 'descLength');
+    }
+
+    // AJAX load buttons
+    $('.ajax-load-button').click(function () {
+        var $this = $(this);
+        $this.addClass('disabled');
+
+        $.ajax({
+            url: $this.data('url'),
+            headers: {
+                'X-AJAX': "true"
+            }
+        }).success(function (data, status, request) {
+            $(data).insertBefore($this);
+
+            // Update new URL or remove self if no more feeds
+            var url = request.getResponseHeader('X-AJAX-URL');
+            if (url) {
+                $this.data('url', url);
+                $this.removeClass('disabled');
+            } else {
+                $this.remove();
+            }
+        });
+    });
+
+    // Helpers
     $('.delete-button').click(function () {
         var $this = $(this);
         $('.delete.modal').modal({
@@ -1320,7 +1315,7 @@ $(document).ready(function () {
                 $.post($this.data('url'), {
                     "_csrf": csrf,
                     "id": $this.data("id")
-                }).done(function (data) {
+                }).success(function (data) {
                     window.location.href = data.redirect;
                 });
             }
@@ -1340,6 +1335,19 @@ $(document).ready(function () {
         }).done(function () {
             window.location.href = $this.data('done-url');
         });
+    });
+
+    // Check or select on option to enable/disable target region
+    $('.enable-system').change(function () {
+        if (this.checked) {
+            $($(this).data('target')).removeClass('disabled');
+        } else {
+            $($(this).data('target')).addClass('disabled');
+        }
+    });
+    $('.enable-system-radio').change(function () {
+        $($(this).data('enable')).removeClass('disabled');
+        $($(this).data('disable')).addClass('disabled');
     });
 
     // Set anchor.
@@ -1367,13 +1375,11 @@ $(document).ready(function () {
     searchRepositories();
 
     initCommentForm();
-    initInstall();
     initRepository();
     initWikiForm();
     initEditForm();
     initEditor();
     initOrganization();
-    initWebhook();
     initAdmin();
     initCodeView();
 
@@ -1393,7 +1399,8 @@ $(document).ready(function () {
 
     var routes = {
         'div.user.settings': initUserSettings,
-        'div.repository.settings.collaboration': initRepositoryCollaboration
+        'div.repository.settings.collaboration': initRepositoryCollaboration,
+        'div.webhook.settings': initWebhookSettings
     };
 
     var selector;
@@ -1451,3 +1458,42 @@ $(function () {
     if ($('.user.signin').length > 0) return;
     $('form').areYouSure();
 });
+
+ // getByteLen counts bytes in a string's UTF-8 representation.
+function getByteLen(normalVal) {
+    // Force string type
+    normalVal = String(normalVal);
+
+    var byteLen = 0;
+    for (var i = 0; i < normalVal.length; i++) {
+        var c = normalVal.charCodeAt(i);
+        byteLen += c < (1 <<  7) ? 1 :
+                   c < (1 << 11) ? 2 :
+                   c < (1 << 16) ? 3 :
+                   c < (1 << 21) ? 4 :
+                   c < (1 << 26) ? 5 :
+                   c < (1 << 31) ? 6 : Number.NaN;
+    }
+    return byteLen;
+}
+
+function showMessageMaxLength(maxLen, textElemId, counterId) {
+    var $msg = $('#'+textElemId);
+    $('#'+counterId).html(maxLen - getByteLen($msg.val()));
+
+    var onMessageKey = function (e) {
+        var $msg = $(this);
+        var text = $msg.val();
+        var len = getByteLen(text);
+        var remainder = maxLen - len;
+
+        if (len >= maxLen) {
+            $msg.val($msg.val().substr(0, maxLen));
+            remainder = 0;
+        }
+
+        $('#'+counterId).html(remainder);
+    };
+
+    $msg.keyup(onMessageKey).keydown(onMessageKey);
+}

@@ -17,12 +17,13 @@ import (
 
 	"github.com/Unknwon/com"
 	gouuid "github.com/satori/go.uuid"
+	log "gopkg.in/clog.v1"
 
-	git "github.com/gogits/git-module"
+	git "github.com/gogs/git-module"
 
-	"github.com/gogits/gogs/modules/log"
-	"github.com/gogits/gogs/modules/process"
-	"github.com/gogits/gogs/modules/setting"
+	"github.com/gogs/gogs/models/errors"
+	"github.com/gogs/gogs/pkg/process"
+	"github.com/gogs/gogs/pkg/setting"
 )
 
 // ___________    .___.__  __    ___________.__.__
@@ -92,13 +93,29 @@ func (repo *Repository) UpdateRepoFile(doer *User, opts UpdateRepoFileOptions) (
 		return fmt.Errorf("UpdateLocalCopyBranch [branch: %s]: %v", opts.OldBranch, err)
 	}
 
+	repoPath := repo.RepoPath()
+	localPath := repo.LocalCopyPath()
+
 	if opts.OldBranch != opts.NewBranch {
+		// Directly return error if new branch already exists in the server
+		if git.IsBranchExist(repoPath, opts.NewBranch) {
+			return errors.BranchAlreadyExists{opts.NewBranch}
+		}
+
+		// Otherwise, delete branch from local copy in case out of sync
+		if git.IsBranchExist(localPath, opts.NewBranch) {
+			if err = git.DeleteBranch(localPath, opts.NewBranch, git.DeleteBranchOptions{
+				Force: true,
+			}); err != nil {
+				return fmt.Errorf("DeleteBranch [name: %s]: %v", opts.NewBranch, err)
+			}
+		}
+
 		if err := repo.CheckoutNewBranch(opts.OldBranch, opts.NewBranch); err != nil {
 			return fmt.Errorf("CheckoutNewBranch [old_branch: %s, new_branch: %s]: %v", opts.OldBranch, opts.NewBranch, err)
 		}
 	}
 
-	localPath := repo.LocalCopyPath()
 	oldFilePath := path.Join(localPath, opts.OldTreeName)
 	filePath := path.Join(localPath, opts.NewTreeName)
 	os.MkdirAll(path.Dir(filePath), os.ModePerm)
@@ -135,12 +152,12 @@ func (repo *Repository) UpdateRepoFile(doer *User, opts UpdateRepoFileOptions) (
 
 	gitRepo, err := git.OpenRepository(repo.RepoPath())
 	if err != nil {
-		log.Error(4, "OpenRepository: %v", err)
+		log.Error(2, "OpenRepository: %v", err)
 		return nil
 	}
 	commit, err := gitRepo.GetBranchCommit(opts.NewBranch)
 	if err != nil {
-		log.Error(4, "GetBranchCommit [branch: %s]: %v", opts.NewBranch, err)
+		log.Error(2, "GetBranchCommit [branch: %s]: %v", opts.NewBranch, err)
 		return nil
 	}
 
@@ -162,10 +179,11 @@ func (repo *Repository) UpdateRepoFile(doer *User, opts UpdateRepoFileOptions) (
 		NewCommitID: commit.ID.String(),
 		Commits:     pushCommits,
 	}); err != nil {
-		log.Error(4, "CommitRepoAction: %v", err)
+		log.Error(2, "CommitRepoAction: %v", err)
 		return nil
 	}
 
+	go AddTestPullRequestTask(doer, repo.ID, opts.NewBranch, true)
 	return nil
 }
 
@@ -265,12 +283,12 @@ func (repo *Repository) DeleteRepoFile(doer *User, opts DeleteRepoFileOptions) (
 
 	gitRepo, err := git.OpenRepository(repo.RepoPath())
 	if err != nil {
-		log.Error(4, "OpenRepository: %v", err)
+		log.Error(2, "OpenRepository: %v", err)
 		return nil
 	}
 	commit, err := gitRepo.GetBranchCommit(opts.NewBranch)
 	if err != nil {
-		log.Error(4, "GetBranchCommit [branch: %s]: %v", opts.NewBranch, err)
+		log.Error(2, "GetBranchCommit [branch: %s]: %v", opts.NewBranch, err)
 		return nil
 	}
 
@@ -288,10 +306,11 @@ func (repo *Repository) DeleteRepoFile(doer *User, opts DeleteRepoFileOptions) (
 		NewCommitID: commit.ID.String(),
 		Commits:     pushCommits,
 	}); err != nil {
-		log.Error(4, "CommitRepoAction: %v", err)
+		log.Error(2, "CommitRepoAction: %v", err)
 		return nil
 	}
 
+	go AddTestPullRequestTask(doer, repo.ID, opts.NewBranch, true)
 	return nil
 }
 
@@ -305,7 +324,7 @@ func (repo *Repository) DeleteRepoFile(doer *User, opts DeleteRepoFileOptions) (
 
 // Upload represent a uploaded file to a repo to be deleted when moved
 type Upload struct {
-	ID   int64  `xorm:"pk autoincr"`
+	ID   int64
 	UUID string `xorm:"uuid UNIQUE"`
 	Name string
 }
@@ -378,7 +397,7 @@ func DeleteUploads(uploads ...*Upload) (err error) {
 	}
 
 	sess := x.NewSession()
-	defer sessionRelease(sess)
+	defer sess.Close()
 	if err = sess.Begin(); err != nil {
 		return err
 	}
@@ -489,12 +508,12 @@ func (repo *Repository) UploadRepoFiles(doer *User, opts UploadRepoFileOptions) 
 
 	gitRepo, err := git.OpenRepository(repo.RepoPath())
 	if err != nil {
-		log.Error(4, "OpenRepository: %v", err)
+		log.Error(2, "OpenRepository: %v", err)
 		return nil
 	}
 	commit, err := gitRepo.GetBranchCommit(opts.NewBranch)
 	if err != nil {
-		log.Error(4, "GetBranchCommit [branch: %s]: %v", opts.NewBranch, err)
+		log.Error(2, "GetBranchCommit [branch: %s]: %v", opts.NewBranch, err)
 		return nil
 	}
 
@@ -512,9 +531,10 @@ func (repo *Repository) UploadRepoFiles(doer *User, opts UploadRepoFileOptions) 
 		NewCommitID: commit.ID.String(),
 		Commits:     pushCommits,
 	}); err != nil {
-		log.Error(4, "CommitRepoAction: %v", err)
+		log.Error(2, "CommitRepoAction: %v", err)
 		return nil
 	}
 
+	go AddTestPullRequestTask(doer, repo.ID, opts.NewBranch, true)
 	return DeleteUploads(uploads...)
 }
